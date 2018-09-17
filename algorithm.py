@@ -83,6 +83,7 @@ class ATOC_COMA_trainer(object):
         self.num_inputs = num_inputs
         self.action_space = action_space
 
+        #
         self.actor = Actor(hidden_size, self.num_inputs, self.action_space)
         self.actor_target = Actor(hidden_size, self.num_inputs, self.action_space)
         self.actor_perturbed = Actor(hidden_size, self.num_inputs, self.action_space)
