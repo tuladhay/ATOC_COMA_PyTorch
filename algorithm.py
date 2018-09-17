@@ -19,9 +19,59 @@ def hard_update(target, source):
 
 
 # My previous implementation of DDPG was slightly different. See the repo
-class Actor(nn.Module):
+class ActorPart1(nn.Module):
+    # The return will be the same size as the hidden_size
+    def __init__(self, hidden_size, num_inputs):
+        super(ActorPart1, self).__init__()
+        self.linear1 = nn.Linear(num_inputs, hidden_size)
+        self.ln1 = nn.LayerNorm(hidden_size)
+
+        self.linear2 = nn.Linear(hidden_size, hidden_size)
+        self.ln2 = nn.LayerNorm(hidden_size)
+
+    def forward(self, observation):
+        x = observation
+        x = self.linear1(x)
+        x = self.ln1(x)
+        x = F.relu(x)
+        x = self.linear2(x)
+        x = self.ln2(x)
+        return x  # returns "individual thought", size same as hidden_size
+
+
+class AttentionUnit(nn.Module):
+    # TODO: currently using RNN, later try LSTM
+    # ref: https://pytorch.org/tutorials/intermediate/char_rnn_classification_tutorial.html
+    # ref for LSTM: https://github.com/MorvanZhou/PyTorch-Tutorial/blob/master/tutorial-contents/402_RNN_classifier.py
+    """
+    We assume a fixed communication bandwidth, which means each initiator can select at most m collaborators. The initiator first chooses collaborators from agents who have not
+    been selected, then from agents selected by other initiators, finally from other initiators, all based on
+    proximity. "based on proximity" is the answer.
+    """
+    def __init__(self, hidden_size, num_inputs):
+        # num_inputs is for the size of "thoughts"
+        # num_output is binary
+        super(AttentionUnit, self).__init__()
+        self.hidden_size = hidden_size
+        num_output = 1
+        self.i2h = nn.Linear(num_inputs + hidden_size, hidden_size)
+        self.i20 = nn.Linear(num_inputs + hidden_size, num_output)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, thoughts, hidden):
+        combined = torch.cat((thoughts, hidden), 1)
+        hidden = self.i2h(combined)  # update the hidden state for next time-step
+        output = self.i20(combined)
+        output = self.sigmoid(output)
+        return output, hidden
+
+    def initHidden(self):
+        return torch.zeros(1, self.hidden_size)  # maybe also try random initialization
+
+
+class ActorPart2(nn.Module):
     def __init__(self, hidden_size, num_inputs, action_space):
-        super(Actor, self).__init__()
+        super(ActorPart2, self).__init__()
         self.action_space = action_space
         num_outputs = action_space.shape[0]
 
@@ -83,11 +133,17 @@ class ATOC_COMA_trainer(object):
         self.num_inputs = num_inputs
         self.action_space = action_space
 
-        #
-        self.actor = Actor(hidden_size, self.num_inputs, self.action_space)
-        self.actor_target = Actor(hidden_size, self.num_inputs, self.action_space)
-        self.actor_perturbed = Actor(hidden_size, self.num_inputs, self.action_space)
-        self.actor_optim = Adam(self.actor.parameters(), lr=1e-4)
+        # Define actor part 1
+        self.actor_p1 = ActorPart1(hidden_size, self.num_inputs, self.action_space)
+        self.actor_target_p1 = ActorPart1(hidden_size, self.num_inputs, self.action_space)
+        self.actor_perturbed_p1 = ActorPart1(hidden_size, self.num_inputs, self.action_space)
+        self.actor_optim_p1 = Adam(self.actor_p1.parameters(), lr=1e-4)
+
+        # Define actor part 2
+        self.actor_p2 = ActorPart1(hidden_size, self.num_inputs, self.action_space)
+        self.actor_target_p2 = ActorPart1(hidden_size, self.num_inputs, self.action_space)
+        self.actor_perturbed_p2 = ActorPart1(hidden_size, self.num_inputs, self.action_space)
+        self.actor_optim_p2 = Adam(self.actor_p2.parameters(), lr=1e-4)
 
         self.critic = Critic(hidden_size, self.num_inputs, self.action_space)
         self.critic_target = Critic(hidden_size, self.num_inputs, self.action_space)
@@ -96,10 +152,12 @@ class ATOC_COMA_trainer(object):
         self.gamma = gamma
         self.tau = tau
 
-        hard_update(self.actor_target, self.actor)  # Make sure target is with the same weight
+        # TODO: figure out how to update actor_p1
+        hard_update(self.actor_target_p2, self.actor_p2)  # Make sure target is with the same weight
         hard_update(self.critic_target, self.critic)
 
     def select_action(self, state, action_noise=None, param_noise=None):
+        # TODO: This needs an overhaul since here the attention and communication modules come in
         self.actor.eval()
         if param_noise is not None:
             mu = self.actor_perturbed((Variable(state)))
