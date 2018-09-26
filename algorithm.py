@@ -21,6 +21,7 @@ def hard_update(target, source):
 # My previous implementation of DDPG was slightly different. See the repo
 class ActorPart1(nn.Module):
     # The return will be the same size as the hidden_size
+    # Status: Done, optimize later
     def __init__(self, hidden_size, num_inputs):
         super(ActorPart1, self).__init__()
         self.linear1 = nn.Linear(num_inputs, hidden_size)
@@ -36,16 +37,18 @@ class ActorPart1(nn.Module):
         x = F.relu(x)
         x = self.linear2(x)
         x = self.ln2(x)
-        return x  # returns "individual thought", size same as hidden_size
+        return x
+        # returns "individual thought", size same as hidden_size, since this will go into the Attentional Unit
 
 
 class AttentionUnit(nn.Module):
-    # TODO: currently using RNN, later try LSTM
+    # Currently using RNN, later try LSTM
     # ref: https://pytorch.org/tutorials/intermediate/char_rnn_classification_tutorial.html
     # ref for LSTM: https://github.com/MorvanZhou/PyTorch-Tutorial/blob/master/tutorial-contents/402_RNN_classifier.py
     """
-    We assume a fixed communication bandwidth, which means each initiator can select at most m collaborators. The initiator first chooses collaborators from agents who have not
-    been selected, then from agents selected by other initiators, finally from other initiators, all based on
+    We assume a fixed communication bandwidth, which means each initiator can select at most m collaborators.
+    The initiator first chooses collaborators from agents who have not been selected,
+    then from agents selected by other initiators, Finally from other initiators, all based on
     proximity. "based on proximity" is the answer.
     """
     def __init__(self, hidden_size, num_inputs):
@@ -58,7 +61,7 @@ class AttentionUnit(nn.Module):
         self.i20 = nn.Linear(num_inputs + hidden_size, num_output)
         self.sigmoid = nn.Sigmoid()
 
-    def forward(self, thoughts, hidden):
+    def forward(self, thoughts, hidden):  # thoughts is the output of actor_part1
         combined = torch.cat((thoughts, hidden), 1)
         hidden = self.i2h(combined)  # update the hidden state for next time-step
         output = self.i20(combined)
@@ -95,6 +98,7 @@ class ActorPart2(nn.Module):
         x = F.relu(x)
         mu = F.tanh(self.mu(x))
         return mu
+        # This is the action for the agent
 
 
 class Critic(nn.Module):
@@ -107,9 +111,12 @@ class Critic(nn.Module):
         self.ln1 = nn.LayerNorm(hidden_size)
 
         self.linear2 = nn.Linear(hidden_size + num_outputs, hidden_size)
+        # I think this is because on the second layer of critic, we concatenate the observation and the actor's action,
+        # and the observation space
+        # TODO: What's the reason behind this and can we do better?
         self.ln2 = nn.LayerNorm(hidden_size)
 
-        self.V = nn.Linear(hidden_size, 1)
+        self.V = nn.Linear(hidden_size, 1)  # This is the Q value with NN as function approximator
         self.V.weight.data.mul_(0.1)
         self.V.bias.data.mul_(0.1)
 
