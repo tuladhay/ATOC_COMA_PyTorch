@@ -141,15 +141,15 @@ class ATOC_COMA_trainer(object):
         self.action_space = action_space
 
         # Define actor part 1
-        self.actor_p1 = ActorPart1(hidden_size, self.num_inputs, self.action_space)
-        self.actor_target_p1 = ActorPart1(hidden_size, self.num_inputs, self.action_space)
-        self.actor_perturbed_p1 = ActorPart1(hidden_size, self.num_inputs, self.action_space)
+        self.actor_p1 = ActorPart1(hidden_size, self.num_inputs)
+        self.actor_target_p1 = ActorPart1(hidden_size, self.num_inputs)
+        self.actor_perturbed_p1 = ActorPart1(hidden_size, self.num_inputs)  #TODO: What is this for?
         self.actor_optim_p1 = Adam(self.actor_p1.parameters(), lr=1e-4)
 
         # Define actor part 2
-        self.actor_p2 = ActorPart1(hidden_size, self.num_inputs, self.action_space)
-        self.actor_target_p2 = ActorPart1(hidden_size, self.num_inputs, self.action_space)
-        self.actor_perturbed_p2 = ActorPart1(hidden_size, self.num_inputs, self.action_space)
+        self.actor_p2 = ActorPart2(hidden_size, self.num_inputs, self.action_space)
+        self.actor_target_p2 = ActorPart2(hidden_size, self.num_inputs, self.action_space)
+        self.actor_perturbed_p2 = ActorPart2(hidden_size, self.num_inputs, self.action_space)  #TODO: What is this for?
         self.actor_optim_p2 = Adam(self.actor_p2.parameters(), lr=1e-4)
 
         self.critic = Critic(hidden_size, self.num_inputs, self.action_space)
@@ -159,7 +159,7 @@ class ATOC_COMA_trainer(object):
         self.gamma = gamma
         self.tau = tau
 
-        # TODO: figure out how to update actor_p1
+        hard_update(self.actor_target_p1, self.actor_p1)
         hard_update(self.actor_target_p2, self.actor_p2)  # Make sure target is with the same weight
         hard_update(self.critic_target, self.critic)
 
@@ -180,6 +180,7 @@ class ATOC_COMA_trainer(object):
         return mu.clamp(-1, 1)
 
     def update_parameters(self, batch):
+        # TODO: How to update (get gradients for) actor_part1
         state_batch = Variable(torch.cat(batch.state))
         action_batch = Variable(torch.cat(batch.action))
         reward_batch = Variable(torch.cat(batch.reward))
