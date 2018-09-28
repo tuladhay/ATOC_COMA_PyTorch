@@ -88,6 +88,8 @@ class ActorPart2(nn.Module):
         self.mu.weight.data.mul_(0.1)
         self.mu.bias.data.mul_(0.1)
 
+        self.softmax = F.softmax(num_outputs, dim=0)
+
     def forward(self, inputs):
         x = inputs
         x = self.linear1(x)
@@ -97,8 +99,9 @@ class ActorPart2(nn.Module):
         x = self.ln2(x)
         x = F.relu(x)
         mu = F.tanh(self.mu(x))
-        return mu
-        # This is the action for the agent
+        output = self.softmax(mu)
+        return output
+        # This is the softmax probabilities for the actions of the agent
 
 
 class Critic(nn.Module):
@@ -143,13 +146,13 @@ class ATOC_COMA_trainer(object):
         # Define actor part 1
         self.actor_p1 = ActorPart1(hidden_size, self.num_inputs)
         self.actor_target_p1 = ActorPart1(hidden_size, self.num_inputs)
-        self.actor_perturbed_p1 = ActorPart1(hidden_size, self.num_inputs)  #TODO: What is this for?
+        #self.actor_perturbed_p1 = ActorPart1(hidden_size, self.num_inputs)  #TODO: What is this for?
         self.actor_optim_p1 = Adam(self.actor_p1.parameters(), lr=1e-4)
 
         # Define actor part 2
         self.actor_p2 = ActorPart2(hidden_size, self.num_inputs, self.action_space)
         self.actor_target_p2 = ActorPart2(hidden_size, self.num_inputs, self.action_space)
-        self.actor_perturbed_p2 = ActorPart2(hidden_size, self.num_inputs, self.action_space)  #TODO: What is this for?
+        #self.actor_perturbed_p2 = ActorPart2(hidden_size, self.num_inputs, self.action_space)  #TODO: What is this for?
         self.actor_optim_p2 = Adam(self.actor_p2.parameters(), lr=1e-4)
 
         self.critic = Critic(hidden_size, self.num_inputs, self.action_space)
@@ -164,27 +167,36 @@ class ATOC_COMA_trainer(object):
         hard_update(self.critic_target, self.critic)
 
     def select_action(self, state, action_noise=None, param_noise=None):
+        '''
+        Here, I am first trying to have the algorithm working without the attentional communication unit.
+        I want to make sure the split actor 1 and actor 2 gradients are calculated correctly, and figure out how to
+        share actor policy parameters
+        '''
         # TODO: This needs an overhaul since here the attention and communication modules come in
-        self.actor.eval()
-        if param_noise is not None:
-            mu = self.actor_perturbed((Variable(state)))
-        else:
-            mu = self.actor((Variable(state)))
+        # TODO: First make it work without the attentional and communication units
+        self.actor_p1.eval()  # setting the actor in evaluation mode
+        self.actor_p2.eval()
 
-        self.actor.train()
-        mu = mu.data
+        # TODO: Originally there was parameter noise incorporated, using the actor_purturbed, revisit original code
+        actor1_action = self.actor_p1((Variable(state)))  # this gets us the thoughts
+        actor2_action = self.actor_p2(Variable(actor1_action))  # directly passing thoughts to actor2
+
+        self.actor_p1.train()
+        self.actor_p2.train()
+        final_action = actor2_action.data
 
         if action_noise is not None:
-            mu += torch.Tensor(action_noise.noise())
+            final_action += torch.Tensor(action_noise.noise())
 
-        return mu.clamp(-1, 1)
+        return final_action.clamp(-1, 1)  # TODO: revisit the theory behind clamping/clipping
 
     def update_parameters(self, batch):
-        # TODO: How to update (get gradients for) actor_part1
+        # TODO: How to update (get gradients for) actor_part1. I think the dynamic graph should update itself
+        # TODO: understand how they batches are working. Currently I am assuming they work as they should
         state_batch = Variable(torch.cat(batch.state))
         action_batch = Variable(torch.cat(batch.action))
         reward_batch = Variable(torch.cat(batch.reward))
-        mask_batch = Variable(torch.cat(batch.mask))
+        mask_batch = Variable(torch.cat(batch.mask))  # TODO: What is this mask?
         next_state_batch = Variable(torch.cat(batch.next_state))
 
         next_action_batch = self.actor_target(next_state_batch)
@@ -202,6 +214,7 @@ class ATOC_COMA_trainer(object):
         value_loss.backward()
         self.critic_optim.step()
 
+        # TODO: I NEED TO MAKE CHANGES HERE. EVERYTHING ABOVE SEEMS TO BE FINE
         self.actor_optim.zero_grad()
 
         policy_loss = -self.critic((state_batch), self.actor((state_batch)))
